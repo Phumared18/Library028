@@ -7,23 +7,58 @@ import {
   Skeleton,
   Stack,
   Table,
+  Text,
   TextInput
 } from '@mantine/core'
 import { useForm } from '@mantine/form'
 import { notifications } from '@mantine/notifications'
 import { IconPencil, IconPlus, IconTrash } from '@tabler/icons-react'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import PageHeader from '../../components/PageHeader'
 import useDelayedLoading from '../../hooks/useDelayedLoading'
 import { useLibraryStore } from '../../store/libraryStore'
 import type { Member } from '../../types'
 
+type ApiMember = Partial<Member> & {
+  _id?: string
+  createdAt?: string
+  fullName?: string
+  phoneNumber?: string
+}
+
+const buildMemberFromApi = (item: ApiMember): Member | null => {
+  if (!item) {
+    return null
+  }
+
+  const id = item.id ?? item._id
+  const name = item.name ?? item.fullName
+  const email = item.email
+
+  if (!id || !name || !email) {
+    return null
+  }
+
+  return {
+    id,
+    name,
+    email,
+    phone: item.phone ?? item.phoneNumber ?? '',
+    memberSince:
+      item.memberSince ??
+      (item.createdAt ? item.createdAt.slice(0, 10) : new Date().toISOString().slice(0, 10))
+  }
+}
+
 const MembersPage = () => {
-  const { members, addMember, updateMember, deleteMember } = useLibraryStore()
+  const { members, addMember, updateMember, deleteMember, setMembers } = useLibraryStore()
   const [query, setQuery] = useState('')
   const [opened, setOpened] = useState(false)
   const [editing, setEditing] = useState<Member | null>(null)
-  const loading = useDelayedLoading(500)
+  const [isFetching, setIsFetching] = useState(false)
+  const [fetchError, setFetchError] = useState<string | null>(null)
+  const delayedLoading = useDelayedLoading(500)
+  const loading = delayedLoading || isFetching
 
   const form = useForm({
     initialValues: {
@@ -47,6 +82,73 @@ const MembersPage = () => {
       return matchesQuery
     })
   }, [members, query])
+
+  useEffect(() => {
+    const apiBase = import.meta.env.VITE_API_BASE_URL
+    if (!apiBase) {
+      return
+    }
+
+    const controller = new AbortController()
+
+    const loadMembers = async () => {
+      setIsFetching(true)
+      setFetchError(null)
+
+      try {
+        const token =
+          window.localStorage.getItem('lm_token') ??
+          window.localStorage.getItem('token') ??
+          ''
+        const headers: Record<string, string> = {
+          'Content-Type': 'application/json'
+        }
+
+        if (token) {
+          headers.Authorization = `Bearer ${token}`
+        }
+
+        const response = await fetch(`${apiBase}/users`, {
+          method: 'GET',
+          headers,
+          signal: controller.signal
+        })
+
+        if (!response.ok) {
+          throw new Error(`โหลดสมาชิกไม่สำเร็จ (${response.status})`)
+        }
+
+        const payload = await response.json()
+        const list = Array.isArray(payload)
+          ? payload
+          : payload.data ?? payload.users ?? []
+        const nextMembers = list
+          .map((item: ApiMember) => buildMemberFromApi(item))
+          .filter(Boolean) as Member[]
+
+        setMembers(nextMembers)
+      } catch (error) {
+        if (error instanceof DOMException && error.name === 'AbortError') {
+          return
+        }
+
+        const message =
+          error instanceof Error ? error.message : 'โหลดข้อมูลสมาชิกไม่สำเร็จ'
+        setFetchError(message)
+        notifications.show({
+          title: 'โหลดข้อมูลล้มเหลว',
+          message,
+          color: 'red'
+        })
+      } finally {
+        setIsFetching(false)
+      }
+    }
+
+    loadMembers()
+
+    return () => controller.abort()
+  }, [setMembers])
 
   const openCreate = () => {
     setEditing(null)
@@ -120,6 +222,12 @@ const MembersPage = () => {
             w={{ base: '100%', sm: 260 }}
           />
         </Group>
+
+        {fetchError && (
+          <Text c="red" size="sm" mb="md">
+            {fetchError}
+          </Text>
+        )}
 
         <Table striped highlightOnHover withRowBorders>
           <Table.Thead>

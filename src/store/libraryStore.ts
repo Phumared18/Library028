@@ -22,6 +22,7 @@ type LibraryState = {
   books: Book[]
   members: Member[]
   borrows: BorrowRecord[]
+  setMembers: (members: Member[]) => void
   addBook: (book: Omit<Book, 'id'>) => void
   updateBook: (book: Book) => void
   deleteBook: (id: string) => void
@@ -36,6 +37,9 @@ const libraryCreator: StateCreator<LibraryState, [], [], LibraryState> = (set) =
   books: mockBooks,
   members: mockMembers,
   borrows: mockBorrows,
+  setMembers: (members) => {
+    set(() => ({ members }))
+  },
   addBook: (book) => {
     const newBook: Book = { ...book, id: generateId('book') }
     set((state) => ({ books: [newBook, ...state.books] }))
